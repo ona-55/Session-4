@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>IFH · Buzzer</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:'Helvetica Neue',Arial,sans-serif;background:#0C1A3A;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;overflow:hidden}
+h1{color:#C9A84C;font-size:18px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;text-align:center;margin-bottom:8px}
+.subtitle{color:rgba(255,255,255,.4);font-size:12px;font-weight:600;text-align:center;margin-bottom:32px;letter-spacing:.08em;text-transform:uppercase}
+
+/* TEAM SELECT */
+#teamSelect{display:flex;flex-direction:column;gap:14px;width:100%;max-width:320px}
+.team-btn{padding:22px;border-radius:16px;border:2px solid;font-size:16px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;transition:all .15s;background:transparent}
+.team-btn.t1{color:#C9A84C;border-color:#C9A84C}
+.team-btn.t1:active{background:#C9A84C;color:#0C1A3A}
+.team-btn.t2{color:#4C9AC9;border-color:#4C9AC9}
+.team-btn.t2:active{background:#4C9AC9;color:#0C1A3A}
+.team-btn.t3{color:#2D7A4F;border-color:#2D7A4F}
+.team-btn.t3:active{background:#2D7A4F;color:white}
+
+/* BUZZER */
+#buzzerScreen{display:none;flex-direction:column;align-items:center;justify-content:center;width:100%}
+.team-name-display{font-size:14px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;margin-bottom:28px}
+.buzzer{width:260px;height:260px;border-radius:50%;border:none;cursor:pointer;font-size:22px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;transition:all .1s;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;user-select:none;-webkit-user-select:none}
+.buzzer:active{transform:scale(.93)}
+.buzzer.t1{background:#C9A84C;color:#0C1A3A;box-shadow:0 0 0 12px rgba(201,168,76,.2),0 12px 40px rgba(201,168,76,.4)}
+.buzzer.t2{background:#4C9AC9;color:white;box-shadow:0 0 0 12px rgba(76,154,201,.2),0 12px 40px rgba(76,154,201,.4)}
+.buzzer.t3{background:#2D7A4F;color:white;box-shadow:0 0 0 12px rgba(45,122,79,.2),0 12px 40px rgba(45,122,79,.4)}
+.buzzer-icon{font-size:48px;line-height:1}
+.buzzer-label{font-size:16px;font-weight:900;letter-spacing:.1em}
+.buzzer.fired{animation:buzzpulse .4s ease}
+@keyframes buzzpulse{0%{transform:scale(1)}30%{transform:scale(.88)}70%{transform:scale(1.05)}100%{transform:scale(1)}}
+.status{margin-top:24px;font-size:13px;font-weight:700;color:rgba(255,255,255,.45);text-align:center;min-height:20px;letter-spacing:.06em}
+.status.sent{color:#7DDDAA}
+.status.locked{color:#FF8A8A}
+.change-btn{margin-top:28px;background:transparent;border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.4);font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:8px 20px;border-radius:20px;cursor:pointer;transition:.2s}
+.change-btn:active{border-color:rgba(255,255,255,.5);color:rgba(255,255,255,.7)}
+.connecting{color:rgba(255,255,255,.3);font-size:11px;text-align:center;margin-top:16px;letter-spacing:.08em}
+</style>
+</head>
+<body>
+
+<div id="mainScreen">
+  <h1>IFH Session 4</h1>
+  <div class="subtitle">Select your team</div>
+  <div id="teamSelect">
+    <button class="team-btn t1" onclick="selectTeam(1,'Team 1','t1')">Team 1</button>
+    <button class="team-btn t2" onclick="selectTeam(2,'Team 2','t2')">Team 2</button>
+    <button class="team-btn t3" onclick="selectTeam(3,'Team 3','t3')">Team 3</button>
+  </div>
+</div>
+
+<div id="buzzerScreen">
+  <div class="team-name-display" id="teamNameDisplay"></div>
+  <button class="buzzer" id="buzzerBtn" onclick="buzz()">
+    <div class="buzzer-icon">🔔</div>
+    <div class="buzzer-label">BUZZ IN</div>
+  </button>
+  <div class="status" id="statusMsg"></div>
+  <button class="change-btn" onclick="changeTeam()">Change Team</button>
+  <div class="connecting" id="connStatus">Connecting...</div>
+</div>
+
+<script>
+const CHANNEL = "ifh-session4-ona55-v2";
+let myTeam = null;
+let myTeamClass = null;
+let locked = false;
+let pubnub = null;
+
+function selectTeam(num, name, cls) {
+  myTeam = num;
+  myTeamClass = cls;
+  document.getElementById('mainScreen').style.display = 'none';
+  const bs = document.getElementById('buzzerScreen');
+  bs.style.display = 'flex';
+  const btn = document.getElementById('buzzerBtn');
+  btn.className = 'buzzer ' + cls;
+  document.getElementById('teamNameDisplay').textContent = name;
+  document.getElementById('teamNameDisplay').style.color = 
+    cls === 't1' ? '#C9A84C' : cls === 't2' ? '#4C9AC9' : '#2D7A4F';
+  initPubNub();
+}
+
+function changeTeam() {
+  document.getElementById('mainScreen').style.display = 'block';
+  document.getElementById('buzzerScreen').style.display = 'none';
+  if (pubnub) { pubnub.unsubscribeAll(); pubnub = null; }
+  locked = false;
+}
+
+function initPubNub() {
+  const script = document.createElement('script');
+  script.src = 'https://cdn.pubnub.com/sdk/javascript/pubnub.7.4.5.min.js';
+  script.onload = () => {
+    pubnub = new PubNub({ publishKey: 'demo', subscribeKey: 'demo', uuid: 'team-' + myTeam + '-' + Date.now() });
+    pubnub.subscribe({ channels: [CHANNEL] });
+    pubnub.addListener({
+      message: (e) => {
+        if (e.message.type === 'reset') {
+          locked = false;
+          document.getElementById('statusMsg').textContent = '';
+          document.getElementById('statusMsg').className = 'status';
+          document.getElementById('buzzerBtn').style.opacity = '1';
+        }
+        if (e.message.type === 'lock') {
+          locked = true;
+          if (e.message.team !== myTeam) {
+            document.getElementById('statusMsg').textContent = 'Another team buzzed first';
+            document.getElementById('statusMsg').className = 'status locked';
+            document.getElementById('buzzerBtn').style.opacity = '.35';
+          }
+        }
+      },
+      status: (s) => {
+        if (s.category === 'PNConnectedCategory') {
+          document.getElementById('connStatus').textContent = '● Connected';
+          document.getElementById('connStatus').style.color = '#7DDDAA';
+        }
+      }
+    });
+  };
+  document.head.appendChild(script);
+}
+
+function buzz() {
+  if (locked) return;
+  locked = true;
+  const btn = document.getElementById('buzzerBtn');
+  btn.classList.add('fired');
+  setTimeout(() => btn.classList.remove('fired'), 400);
+  document.getElementById('statusMsg').textContent = '✓ Buzzed in!';
+  document.getElementById('statusMsg').className = 'status sent';
+  if (pubnub) {
+    pubnub.publish({ channel: CHANNEL, message: { type: 'buzz', team: myTeam, teamClass: myTeamClass, ts: Date.now() } });
+  }
+}
+</script>
+</body>
+</html>
